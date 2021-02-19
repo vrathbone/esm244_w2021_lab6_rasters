@@ -1,0 +1,149 @@
+---
+title: "rasters"
+author: "Vanessa Rathbone"
+date: "2/18/2021"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+library(raster)
+library(tidyverse)
+library(here)
+library(sf)
+library(fasterize)
+```
+
+# The Data
+```{r}
+
+#workign with multiband sattelite data from Landsat
+
+knitr::include_graphics('img/landsat.png')
+```
+
+# Load and inspect the data
+```{r}
+
+landsat_file <- here('data/Landsat7.tif')
+
+ls_1 <- raster(landsat_file)
+ls_1
+
+plot(ls_1)
+```
+```{r}
+#read in them individually
+ls_2 <- raster(landsat_file, band = 2)
+ls_3 <- raster(landsat_file, band = 3)
+ls_4 <- raster(landsat_file, band = 4)
+
+#or as a raster stack
+ls_stack <- raster::stack(landsat_file)
+ls_stack
+```
+## Preparing the data
+```{r}
+#rasters are relatively big, so we're going to make these a little less memory intensive by grouping cells together into one cell using aggregate()
+
+ls_1 <- raster::aggregate(ls_1, fact = 3, fun = mean)
+ls_2 <- raster::aggregate(ls_2, fact = 3, fun = mean)
+ls_3 <- raster::aggregate(ls_3, fact = 3, fun = mean)
+ls_4 <- raster::aggregate(ls_4, fact = 3, fun = mean)
+
+plot(ls_1, col = hcl.colors(n = 100, palette = 'Blues 2'))
+plot(ls_2, col = hcl.colors(n = 100, palette = 'Greens 2'))
+plot(ls_3, col = hcl.colors(n = 100, palette = 'Reds 2'))
+plot(ls_4, col = hcl.colors(n = 100, palette = 'Reds 2'))
+```
+### Mask the layers
+```{r}
+
+#take out all of the stuff that's not land, see key for how 
+#create mask from polygons
+
+sbc_rast <- raster(here('data/county.tif'))
+plot(ls_3)
+
+mask(ls_3, sbc_rast) %>% plot()
+
+ls_3 <- mask(ls_3, sbc_rast)
+ls_4 <- mask(ls_4, sbc_rast)
+```
+# working with rasters
+
+## Raster algebra
+```{r}
+vec1 <- 1:5
+vec1
+vec1 * 2
+vec1 ^2
+
+ls_3
+ls_3 *2 
+log(ls_3)
+plot(ls_3); plot(log(ls_3))
+```
+```{r}
+vec2 <- 6:10
+vec1 + vec2 
+ls_3 + ls_4
+```
+## `raster::calc()`
+```{r}
+
+ls_stack <- stack(ls_1, ls_2, ls_3, ls_4)
+ls_mean <- raster::calc(ls_stack, fun = mean, na.rm = FALSE) #na.rm = FALSE results in no ocean in our plot
+
+plot(ls_mean)
+```
+# Analysis
+
+## NCVI
+```{r}
+#estimate the amount of forest cover based on obsorbption of infared light 
+ knitr::include_graphics('img/spectrum.png')
+
+#note that there's a trough where there's greens and yellows because that not being absorbed by the plant hence why plants are green!!
+
+knitr::include_graphics('img/ir_photo.jpg')
+
+#so cool, taken with infared photography
+```
+
+$$NDVI = \frac{NIR - Red}{NIR + Red}$$
+```{r}
+
+ndvi <- (ls_4 - ls_3) / (ls_4 + ls_3)
+
+plot(ndvi, col = hcl.colors(100, 'Grays'))
+
+#now create a function
+is_forest <- function(x, thresh = .3) {
+  y <- ifelse(x >= thresh, 1, NA)
+  return(y)
+}
+
+forest <- calc(ndvi, fun = is_forest)
+plot(forest, col = 'green')
+```
+# `ggplot` and rasters
+```{r}
+
+ndvi_df <- raster::rasterToPoints(ndvi) %>% 
+  as.data.frame()
+
+forest_df <- rasterToPoints(forest) %>% 
+  as.data.frame()
+
+ggplot(data = ndvi_df, aes(x =x, y = y, fill = layer)) +
+  geom_raster() +
+  geom_raster(data = forest_df, fill = 'green') +
+  coord_sf(expand = 0) +
+  scale_fill_gradient(low = 'black', high = 'white') +
+  theme_void() +
+  theme(panel.background = element_rect(fill = 'slateblue4'))
+
+```
+
